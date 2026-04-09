@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>3D Mini-Craft</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        #ui { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; border: 2px solid #fff; }
+        .slot { width: 60px; height: 60px; border: 2px solid #888; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; }
+        .slot.selected { border-color: #fff; background: rgba(255,255,255,0.3); box-shadow: 0 0 10px #fff; }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 10px; height: 10px; border: 1px solid white; transform: translate(-50%, -50%); pointer-events: none; }
+        #instructions { position: absolute; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); padding: 10px; }
+    </style>
+</head>
+<body>
+    <div id="instructions">WASD to Move | Space to Jump<br>Left Click: Break / Explode<br>Right Click: Place<br>1-2: Switch Block</div>
+    <div id="crosshair"></div>
+    <div id="ui">
+        <div id="slot1" class="slot selected">DIRT (1)</div>
+        <div id="slot2" class="slot">TNT (2)</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Lighting
+        scene.add(new THREE.AmbientLight(0x404040));
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(10, 20, 10);
+        scene.add(light);
+
+        // Materials
+        const dirtMat = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+        const tntMat = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+
+        let selectedBlock = 'dirt';
+        let blocks = [];
+
+        // Simple Ground
+        for(let x = -8; x <= 8; x++) {
+            for(let z = -8; z <= 8; z++) {
+                const cube = new THREE.Mesh(geometry, dirtMat);
+                cube.position.set(x, -1, z);
+                scene.add(cube);
+                blocks.push(cube);
+            }
+        }
+
+        // Movement vars
+        let velocity = new THREE.Vector3(), canJump = false;
+        let keys = {};
+        document.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+            if(e.key === '1') { selectedBlock = 'dirt'; updateUI(1); }
+            if(e.key === '2') { selectedBlock = 'tnt'; updateUI(2); }
+        });
+        document.addEventListener('keyup', (e) => keys[e.code] = false);
+
+        function updateUI(slot) {
+            document.getElementById('slot1').classList.toggle('selected', slot === 1);
+            document.getElementById('slot2').classList.toggle('selected', slot === 2);
+        }
+
+        // Controls
+        renderer.domElement.addEventListener('click', () => renderer.domElement.requestPointerLock());
+        document.addEventListener('mousemove', (e) => {
+            if (document.pointerLockElement === renderer.domElement) {
+                camera.rotation.y -= e.movementX * 0.002;
+                camera.rotation.x -= e.movementY * 0.002;
+                camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+            }
+        });
+
+        // Break/Place/Explode
+        const raycaster = new THREE.Raycaster();
+        document.addEventListener('mousedown', (e) => {
+            if (document.pointerLockElement !== renderer.domElement) return;
+            raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
+            const intersects = raycaster.intersectObjects(blocks);
+
+            if (intersects.length > 0) {
+                const intersect = intersects[0];
+                if (e.button === 0) { // Left Click (Break/Explode)
+                    if (intersect.object.material === tntMat) {
+                        explode(intersect.object.position);
+                    }
+                    scene.remove(intersect.object);
+                    blocks = blocks.filter(b => b !== intersect.object);
+                } else if (e.button === 2) { // Right Click (Place)
+                    const pos = intersect.object.position.clone().add(intersect.face.normal);
+                    const voxel = new THREE.Mesh(geometry, selectedBlock === 'dirt' ? dirtMat : tntMat);
+                    voxel.position.copy(pos);
+                    scene.add(voxel);
+                    blocks.push(voxel);
+                }
+            }
+        });
+
+        function explode(pos) {
+            const range = 3;
+            const toRemove = blocks.filter(b => b.position.distanceTo(pos) < range);
+            toRemove.forEach(b => {
+                scene.remove(b);
+                blocks = blocks.filter(block => block !== b);
+            });
+        }
+
+        camera.position.y = 1.6;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (document.pointerLockElement === renderer.domElement) {
+                const speed = 0.1;
+                if (keys['KeyW']) camera.translateZ(-speed);
+                if (keys['KeyS']) camera.translateZ(speed);
+                if (keys['KeyA']) camera.translateX(-speed);
+                if (keys['KeyD']) camera.translateX(speed);
+                
+                // Gravity / Floor logic
+                velocity.y -= 0.01;
+                camera.position.y += velocity.y;
+                if (camera.position.y < 1.6) {
+                    camera.position.y = 1.6;
+                    velocity.y = 0;
+                    canJump = true;
+                }
+                if (keys['Space'] && canJump) {
+                    velocity.y = 0.2;
+                    canJump = false;
+                }
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
